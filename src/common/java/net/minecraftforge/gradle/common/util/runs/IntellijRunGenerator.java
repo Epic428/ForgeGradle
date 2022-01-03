@@ -20,6 +20,7 @@
 
 package net.minecraftforge.gradle.common.util.runs;
 
+import net.minecraftforge.gradle.common.util.ModConfig;
 import net.minecraftforge.gradle.common.util.RunConfig;
 import net.minecraftforge.gradle.common.util.Utils;
 
@@ -40,6 +41,7 @@ import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -218,25 +220,31 @@ public class IntellijRunGenerator extends RunConfigGenerator.XMLConfigurationBui
     private static Stream<String> mapModClassesToIdea(@Nonnull final Project project, @Nonnull final RunConfig runConfig) {
         final IdeaModel idea = project.getExtensions().findByType(IdeaModel.class);
 
-        JavaPluginExtension javaPlugin = project.getExtensions().getByType(JavaPluginExtension.class);
-        SourceSetContainer sourceSets = javaPlugin.getSourceSets();
-        final SourceSet main = sourceSets.getByName(SourceSet.MAIN_SOURCE_SET_NAME);
         if (runConfig.getMods().isEmpty()) {
-            return getIdeaPathsForSourceset(project, idea, "production", null);
+            return getIdeaPathsForSourceset(project, idea, "", "production", null);
         } else {
-
             return runConfig.getMods().stream()
-                    .map(modConfig -> {
-                        return modConfig.getSources().stream().flatMap(source -> {
-                            String outName = source == main ? "production" : source.getName();
-                            return getIdeaPathsForSourceset(project, idea, outName, modConfig.getName());
-                        });
-                    })
-                    .flatMap(Function.identity());
+                    .flatMap(modConfig -> modConfig.getSources().stream()
+                            .flatMap(source -> {
+                                String outPrefix = project.getAllprojects().stream()
+                                        .filter(project1 -> {
+                                            if (project1 == project) return false;
+                                            for (SourceSet sourceSet : project1.getExtensions().getByType(SourceSetContainer.class)) {
+                                                if (sourceSet == source) return true;
+                                            }
+                                            return false;
+                                        })
+                                        .findFirst()
+                                        .map(project1 -> project.getProjectDir().toPath().relativize(project1.getProjectDir().toPath()).toString())
+                                        .orElse("");
+
+                                String outName = source.getName().equals(SourceSet.MAIN_SOURCE_SET_NAME) ? "production" : source.getName();
+                                return getIdeaPathsForSourceset(project, idea, outPrefix, outName, modConfig.getName());
+                    }));
         }
     }
 
-    private static Stream<String> getIdeaPathsForSourceset(@Nonnull Project project, @Nullable IdeaModel idea, String outName, @Nullable String modName)
+    private static Stream<String> getIdeaPathsForSourceset(@Nonnull Project project, @Nullable IdeaModel idea, String outPrefix, String outName, @Nullable String modName)
     {
         String ideaResources, ideaClasses;
         try
@@ -245,8 +253,8 @@ public class IntellijRunGenerator extends RunConfigGenerator.XMLConfigurationBui
                     ? idea.getProject().getPathFactory().path("$PROJECT_DIR$").getCanonicalUrl()
                     : project.getProjectDir().getCanonicalPath();
 
-            ideaResources = Paths.get(outputPath, "out", outName, "resources").toFile().getCanonicalPath();
-            ideaClasses = Paths.get(outputPath, "out", outName, "classes").toFile().getCanonicalPath();
+            ideaResources = Paths.get(outputPath, outPrefix, "out", outName, "resources").toFile().getCanonicalPath();
+            ideaClasses = Paths.get(outputPath, outPrefix, "out", outName, "classes").toFile().getCanonicalPath();
         }
         catch (IOException e)
         {
